@@ -1,0 +1,57 @@
+name: screenshots
+
+on:
+  push:
+    branches: [screenshots]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  shoot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: mbstring, pdo_sqlite
+          coverage: none
+
+      - name: Set up the chat app
+        run: |
+          composer install --no-interaction --no-progress --prefer-dist
+          cp .env.example .env
+          php artisan key:generate
+          touch database/database.sqlite
+          php artisan migrate --seed --force
+          (php artisan reverb:start > reverb.log 2>&1 &)
+          (php artisan queue:work > queue.log 2>&1 &)
+          (php artisan serve --host=127.0.0.1 --port=8000 > serve.log 2>&1 &)
+          sleep 5
+
+      - name: Set up the arabic-search demo
+        run: |
+          mkdir demo && cp .screenshots/demo.php demo/
+          cd demo && composer require islam016/arabic-search --no-interaction --no-progress
+          (php -S 127.0.0.1:8100 -t . > ../demo.log 2>&1 &)
+          sleep 2
+
+      - name: Take screenshots
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq fonts-noto-core fonts-noto-color-emoji > /dev/null
+          cd .screenshots
+          npm init -y > /dev/null && npm install playwright@1.49.1 > /dev/null
+          npx playwright install --with-deps chromium > /dev/null
+          node shoot.mjs
+          ls -la screens
+
+      - name: Commit screenshots
+        run: |
+          git config user.name "Islam Gaber"
+          git config user.email "islamgaber873@gmail.com"
+          git add .screenshots/screens
+          git commit -m "Add screenshots" || echo "nothing to commit"
+          git push
